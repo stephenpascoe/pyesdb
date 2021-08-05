@@ -3,19 +3,28 @@ Client for EventStore Grpc interface
 
 """
 
-from typing import Optional, Union, Iterator, Any
-from enum import Enum
+from typing import Optional, Union, Iterator, Iterable, Any, Dict
+import uuid as uuid_m
+import json as json_m
+import itertools
+import dataclasses
+from dataclasses import dataclass
 
 import grpc
 
 from .pb.streams_pb2_grpc import StreamsStub
-from .pb.streams_pb2 import ReadReq, ReadResp
+from .pb.streams_pb2 import ReadReq, ReadResp, AppendReq, AppendResp
 
 
-class RevisionOptionEnum(Enum):
-    start = 0
-    end = 1
+class Event:
+    """Inherit from this class to create event types.  Events should be dataclasses."""
+    pass
 
+
+@dataclass
+class MyEvent(Event):
+    foo: str
+    bar: int
 
 
 class EventStore:
@@ -57,12 +66,33 @@ class EventStore:
             # TODO : unpack
             yield resp
 
+    def send_events(self, stream_name: bytes,
+                    events: Iterable[Event],
+                    stream_exists: Optional[bool] = None,
+    ) -> Any:
+
+        # TODO : Better to generate uuid in Event class
+        def mkmsg(event: Event) -> AppendReq:
+            req = _prepare_append_req(uuid=None,
+                                      event_type=event.__class__.__name__,
+                                      json=dataclasses.asdict(event))
+            return req
+
+        # TODO : Support optimistic concurrency control
+        select_req = _prepare_stream_select_req(stream_name=stream_name, stream_exists=stream_exists)
+        msg_reqs = (mkmsg(event) for event in events)
+        reqs = itertools.chain([select_req], msg_reqs)
+
+        import pdb; pdb.set_trace()
+
+        stub = self.streams_stub()
+        resp = stub.Append(reqs)
+
+        return resp
+
 
 def _prepare_read_req(options: ReadReq.Options,
                       count: Optional[int] = None, backwards: bool = False) -> ReadReq:
-    """
-    Create basic streams request without stream_options section
-    """
     req = ReadReq(options=options)
     req.options.resolve_links = True
 
@@ -102,7 +132,7 @@ def _prepare_stream_options(stream_name: str, revision: Optional[int] = None,
     return options
 
 
-def _prepare_all_options(position: Optional[int] = None, backwards: bool = False):
+def _prepare_all_options(position: Optional[int] = None, backwards: bool = False) -> ReadReq.Options:
     # TODO : support prepare_position
 
     options = ReadReq.Options()
@@ -116,3 +146,54 @@ def _prepare_all_options(position: Optional[int] = None, backwards: bool = False
         options.all.position.commit_position = position
 
     return options
+
+
+def _prepare_stream_select_req(stream_name: bytes,
+                               expected_revision: Optional[int] = None,
+                               stream_exists: Optional[bool] = None
+) -> AppendReq:
+    req = AppendReq()
+    req.options.stream_identifier.stream_name = stream_name
+
+    if expected_revision is None:
+        if stream_exists is None:
+            req.options.any.SetInParent()
+        elif stream_exists:
+            req.options.stream_exists.SetInParent()
+        else:
+            req.options.no_stream.SetInParent()
+    else:
+        if stream_exists is not None:
+            raise ValueError('Cannot set stream_exists when specifying expected_revision')
+        req.options.revision = expected_revision
+
+    return req
+
+
+def _prepare_append_req(uuid: Optional[uuid_m.UUID],
+                        event_type: bytes,
+                        json: Dict[str,Any],
+                        metadata: Optional[Dict[str,str]] = None,
+                        custom_metadata: Optional[bytes] = None
+) -> AppendReq:
+    req = AppendReq()
+
+    # TODO : switch to structured uuids
+    if uuid is None:
+        uuid = uuid_m.uuid4()
+
+    req.proposed_message.id.string = str(uuid)
+
+    if metadata:
+        for key, value in metadata.items():
+            req.proposed_message.metadata[key] = value
+
+    req.proposed_message.metadata['type'] = event_type
+    req.proposed_message.metadata['content-type'] = 'application/json'
+
+    if custom_metadata:
+        req.proposed_message.custom_metadata = custom_metadata
+
+    req.proposed_message.data = json_m.dumps(json).encode()
+
+    return req
