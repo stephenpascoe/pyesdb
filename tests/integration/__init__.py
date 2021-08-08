@@ -16,7 +16,7 @@ class SomeEvent(Event):
 
 
 def mk_client():
-    client = EventStore('localhost:2113')
+    client = EventStore("localhost:2113")
 
     return client
 
