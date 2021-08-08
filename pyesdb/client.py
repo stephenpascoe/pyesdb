@@ -13,18 +13,13 @@ from dataclasses import dataclass
 import grpc
 
 from .pb.streams_pb2_grpc import StreamsStub
-from .pb.streams_pb2 import ReadReq, ReadResp, AppendReq, AppendResp
+from .pb.streams_pb2 import ReadReq, ReadResp, AppendReq, AppendResp, DeleteReq
 
 
 class Event:
     """Inherit from this class to create event types.  Events should be dataclasses."""
     pass
 
-
-@dataclass
-class MyEvent(Event):
-    foo: str
-    bar: int
 
 
 class EventStore:
@@ -83,12 +78,19 @@ class EventStore:
         msg_reqs = (mkmsg(event) for event in events)
         reqs = itertools.chain([select_req], msg_reqs)
 
-        import pdb; pdb.set_trace()
-
         stub = self.streams_stub()
         resp = stub.Append(reqs)
 
         return resp
+
+    def delete_stream(self, stream_name: bytes) -> Any:
+        req = _prepare_delete_req(stream_name)
+
+        stub = self.streams_stub()
+        resp = stub.Delete(req)
+
+        return resp
+
 
 
 def _prepare_read_req(options: ReadReq.Options,
@@ -195,5 +197,16 @@ def _prepare_append_req(uuid: Optional[uuid_m.UUID],
         req.proposed_message.custom_metadata = custom_metadata
 
     req.proposed_message.data = json_m.dumps(json).encode()
+
+    return req
+
+
+def _prepare_delete_req(stream_name: bytes, revision: Optional[int] = None):
+    req = DeleteReq()
+    req.options.stream_identifier.stream_name = stream_name
+    if revision is None:
+        req.options.any.SetInParent()
+    else:
+        req.options.revision = revision
 
     return req
