@@ -72,7 +72,7 @@ class EventStore:
         def mkmsg(event: Event) -> AppendReq:
             req = _prepare_append_req(
                 uuid=None,
-                event_type=event.__class__.__name__,
+                event_type=event.__class__.__name__.encode(),
                 json=dataclasses.asdict(event),
             )
             return req
@@ -123,7 +123,7 @@ def _prepare_read_req(
 
 
 def _prepare_stream_options(
-    stream_name: str, revision: Optional[int] = None, backwards: bool = False
+    stream_name: bytes, revision: Optional[int] = None, backwards: bool = False
 ) -> ReadReq.Options:
     options = ReadReq.Options()
     options.stream.stream_identifier.stream_name = stream_name
