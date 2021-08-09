@@ -11,21 +11,33 @@ from locust.exception import LocustError
 from locust.user.task import LOCUST_STATE_STOPPING
 import gevent
 import time
+import random
+from dataclasses import dataclass
 
 import logging
 
-from pyesdb.client import EventStore
+from pyesdb.client import EventStore, Event
 
 # patch grpc so that it uses gevent instead of asyncio
 import grpc.experimental.gevent as grpc_gevent
 
 grpc_gevent.init_gevent()
 
+STREAMS = [f'perftest-{n}'.encode() for n in range(20)]
+
+@dataclass
+class SomeEvent(Event):
+    message: str
+    value: int
+
 
 @events.init.add_listener
 def initialise(environment, **_kwargs):
-    # TODO : reset EventStore
-    pass
+    client = EventStore('localhost:2113')
+    for stream in STREAMS:
+        client.delete_stream(stream)
+    # TODO : Scavange?
+
 
 class EventStoreClient:
     def __init__(self):
@@ -55,16 +67,36 @@ class EventStoreClient:
         return wrapper
 
 
-class ReadAllUser(User):
+class EventStoreUser(User):
+    """
+    Streams all messages for a while then stops
+    """
     def __init__(self, environment):
         super().__init__(environment)
 
         self.client = EventStoreClient()
 
     @task
-    def sayHello(self):
-        batch = self.client.iter_all(count=10000)
-        n = len(list(batch))
-        logging.info('ReadAll user found %s events', n)
+    def watchAll(self):
+        logging.info('Starging read all')
+        n = 0
+        try:
+            for event in self.client.iter_all(timeout=30.0):
+                n += 1
+                if n % 100 == 0:
+                    print('Reading %s from all', n)
+        except grpc._channel._MultiThreadedRendezvous as e:
+            logging.info('Reading finished')
 
-        time.sleep(1)
+        logging.info('Found %s events in all', n)
+
+        time.sleep(5)
+
+    @task(10)
+    def publish(self):
+        # Choose a stream
+        stream = random.choice(STREAMS)
+        events = [SomeEvent(f'Performance event {x}', random.randint(0, 99)) for x in range(50)]
+        self.client.send_events(stream, events)
+
+        self.wait()

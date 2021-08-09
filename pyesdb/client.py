@@ -51,13 +51,14 @@ class EventStore:
             yield resp
 
     def iter_all(
-        self, count: Optional[int] = None, backwards: bool = False, position: int = 0
+        self, count: Optional[int] = None, backwards: bool = False, position: int = 0,
+        timeout: Optional[float] = None
     ) -> Iterator[Any]:
         options = _prepare_all_options(position=position, backwards=backwards)
         req = _prepare_read_req(options=options, count=count, backwards=backwards)
 
         stub = self.streams_stub()
-        for resp in stub.Read(req):
+        for resp in stub.Read(req, timeout=timeout):
             # TODO : unpack
             yield resp
 
