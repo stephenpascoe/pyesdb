@@ -1,0 +1,5 @@
+mypy
+black
+pytest
+locust>=2.1.0
+grpc-tools>=1.39.0
