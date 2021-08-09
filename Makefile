@@ -24,3 +24,6 @@ fiximports:
 	  do sed  's/^import \(.*_pb2\) as \(.*\)/from . import \1 as \2/' $$f >$$f.tmp ; \
 		mv $$f.tmp $$f ; \
 	done
+
+clean:
+	rm -rf $(PACKAGE_DIR)/*
