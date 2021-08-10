@@ -33,3 +33,5 @@ def test_write_read_stream(es_client):
     new_events = list(events_it)
 
     assert len(new_events) == len(events)
+
+    assert new_events[17].data == events[17]

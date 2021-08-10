@@ -9,6 +9,7 @@ import json as json_m
 import itertools
 import dataclasses
 from dataclasses import dataclass
+import json
 
 import grpc
 
@@ -18,8 +19,26 @@ from .pb.streams_pb2 import ReadReq, ReadResp, AppendReq, AppendResp, DeleteReq
 
 class Event:
     """Inherit from this class to create event types.  Events should be dataclasses."""
+    __subclass_cache = {}
 
-    pass
+    @classmethod
+    def get_event_class(cls, event_type: str) -> 'Event':
+        if event_type in cls.__subclass_cache:
+            return cls.__subclass_cache[event_type]
+        else:
+            for subclass in cls.__subclasses__():
+                if subclass.__name__ == event_type:
+                    cls.__subclass_cache[event_type] = subclass
+                    return subclass
+
+        raise ValueError(f'No event_type {event_type}')
+
+
+@dataclass
+class StreamEvent:
+    data: Event
+    id: str
+    stream_revision: int
 
 
 class EventStore:
@@ -29,7 +48,7 @@ class EventStore:
 
         self.channel = grpc.insecure_channel(connection_str)
 
-    def streams_stub(self) -> StreamsStub:
+    def _streams_stub(self) -> StreamsStub:
         return StreamsStub(self.channel)
 
     def iter_stream(
@@ -38,17 +57,19 @@ class EventStore:
         count: Optional[int] = None,
         backwards: bool = False,
         revision: Optional[int] = None,
-    ) -> Iterator[Any]:
+    ) -> Iterator[StreamEvent]:
 
         options = _prepare_stream_options(
             stream_name=stream_name, backwards=backwards, revision=revision
         )
         req = _prepare_read_req(options=options, count=count, backwards=backwards)
 
-        stub = self.streams_stub()
+        stub = self._streams_stub()
         for resp in stub.Read(req):
-            # TODO : Unpack response
-            yield resp
+            # TODO : Handle other response types
+            yield _resp_to_stream_event(resp)
+
+
 
     def iter_all(
         self, count: Optional[int] = None, backwards: bool = False, position: int = 0,
@@ -57,7 +78,7 @@ class EventStore:
         options = _prepare_all_options(position=position, backwards=backwards)
         req = _prepare_read_req(options=options, count=count, backwards=backwards)
 
-        stub = self.streams_stub()
+        stub = self._streams_stub()
         for resp in stub.Read(req, timeout=timeout):
             # TODO : unpack
             yield resp
@@ -85,7 +106,7 @@ class EventStore:
         msg_reqs = (mkmsg(event) for event in events)
         reqs = itertools.chain([select_req], msg_reqs)
 
-        stub = self.streams_stub()
+        stub = self._streams_stub()
         resp = stub.Append(reqs)
 
         return resp
@@ -93,7 +114,7 @@ class EventStore:
     def delete_stream(self, stream_name: bytes) -> Any:
         req = _prepare_delete_req(stream_name)
 
-        stub = self.streams_stub()
+        stub = self._streams_stub()
         resp = stub.Delete(req)
 
         return resp
@@ -224,3 +245,13 @@ def _prepare_delete_req(stream_name: bytes, revision: Optional[int] = None):
         req.options.revision = revision
 
     return req
+
+
+def _resp_to_stream_event(resp: ReadResp):
+    event_type = resp.event.event.metadata['type']
+    event_class = Event.get_event_class(event_type)
+    data = event_class(**json.loads(resp.event.event.data))
+    uuid = resp.event.event.id
+    stream_revision = resp.event.event.stream_revision
+
+    return StreamEvent(id=uuid, data=data, stream_revision=stream_revision)
