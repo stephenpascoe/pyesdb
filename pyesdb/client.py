@@ -69,8 +69,6 @@ class EventStore:
             # TODO : Handle other response types
             yield _resp_to_stream_event(resp)
 
-
-
     def iter_all(
         self, count: Optional[int] = None, backwards: bool = False, position: int = 0,
         timeout: Optional[float] = None
@@ -80,8 +78,16 @@ class EventStore:
 
         stub = self._streams_stub()
         for resp in stub.Read(req, timeout=timeout):
-            # TODO : unpack
-            yield resp
+            # All will contain many events we don't recognise.
+            # Ignore system events
+            if resp.event.event.metadata['type'].startswith('$'):
+                pass
+            # Catch unrecognised events
+            try:
+                yield _resp_to_stream_event(resp)
+            except ValueError:
+                # TODO : Custom exception and warn
+                pass
 
     def send_events(
         self,
