@@ -10,38 +10,17 @@ import itertools
 import dataclasses
 from dataclasses import dataclass
 import json
+from abc import ABC, abstractmethod
 
 import grpc
+
+from .base import AbstractEventStore, Event, StreamEvent
 
 from .pb.streams_pb2_grpc import StreamsStub
 from .pb.streams_pb2 import ReadReq, ReadResp, AppendReq, AppendResp, DeleteReq
 
 
-class Event:
-    """Inherit from this class to create event types.  Events should be dataclasses."""
-    __subclass_cache = {}
-
-    @classmethod
-    def get_event_class(cls, event_type: str) -> 'Event':
-        if event_type in cls.__subclass_cache:
-            return cls.__subclass_cache[event_type]
-        else:
-            for subclass in cls.__subclasses__():
-                if subclass.__name__ == event_type:
-                    cls.__subclass_cache[event_type] = subclass
-                    return subclass
-
-        raise ValueError(f'No event_type {event_type}')
-
-
-@dataclass
-class StreamEvent:
-    data: Event
-    id: str
-    stream_revision: int
-
-
-class EventStore:
+class EventStore(AbstractEventStore):
     def __init__(self, connection_str: str, secure: bool = False) -> None:
         if secure:
             raise NotImplementedError("Secure Grpc is not implemented")
@@ -117,13 +96,13 @@ class EventStore:
 
         return resp
 
-    def delete_stream(self, stream_name: bytes) -> Any:
+    def delete_stream(self, stream_name: bytes) -> bool:
         req = _prepare_delete_req(stream_name)
 
         stub = self._streams_stub()
         resp = stub.Delete(req)
 
-        return resp
+        return resp.WhichOneof('position_option') == 'position'
 
 
 def _prepare_read_req(
