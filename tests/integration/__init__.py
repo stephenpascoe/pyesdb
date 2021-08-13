@@ -7,7 +7,7 @@ import pytest
 from dataclasses import dataclass
 
 from pyesdb.client import EventStore, Event
-
+from pyesdb.messagedb import MessageDB
 
 @dataclass
 class SomeEvent(Event):
@@ -15,8 +15,11 @@ class SomeEvent(Event):
     value: int
 
 
-def mk_client():
-    client = EventStore("localhost:2113")
+def mk_client(backend='eventstore'):
+    if backend == 'eventstore':
+        client = EventStore("localhost:2113")
+    elif backend == 'messagedb':
+        client = MessageDB()
 
     return client
 
